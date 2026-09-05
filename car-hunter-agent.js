@@ -205,9 +205,85 @@ async function scrapeCarGurus() {
 async function scrapeVisorVin() {
   console.log('🔍 Scraping Visor.vin...');
   try {
-    // Visor.vin API (if available)
-    console.log('⚠️ Visor.vin: Requires API integration (skipping in basic mode)');
-    return [];
+    const listings = [];
+    
+    // Build search URL for Ontario, AWD vehicles
+    // Visor.vin search parameters
+    const searchParams = new URLSearchParams({
+      'province': 'ON',
+      'transmission': 'automatic',
+      'drivetrain': 'AWD',
+      'max_price': '25000',
+      'max_mileage': '200000'
+    });
+    
+    const url = `https://www.visor.vin/search?${searchParams.toString()}`;
+    const response = await fetchUrl(url);
+    
+    // Parse HTML to extract car listings
+    // Look for car listing cards in the response
+    const listingPattern = /class=['"']listing[-\w]*['"][^>]*>([\s\S]*?)<\/div>/gi;
+    const matches = response.matchAll(listingPattern);
+    
+    for (const match of matches) {
+      try {
+        const listingHtml = match[1];
+        
+        // Extract make/model
+        const makeModelMatch = listingHtml.match(/(?:Mazda|Toyota|Honda|Subaru|Lexus|Hyundai)\s+(?:CX-5|RAV4|HR-V|Crosstrek|NX|RX|UX|Kona|Tucson|Santa Fe|CR-V|CX5|RAV-4|HRV|CRV)/i);
+        if (!makeModelMatch) continue;
+        
+        const [makeModel] = makeModelMatch[0].split(/\s+(?=CX-5|RAV4|HR-V|Crosstrek|NX|RX|UX|Kona|Tucson|Santa Fe|CR-V|CX5|RAV-4|HRV|CRV)/i);
+        const parts = makeModel.match(/^(\w+)\s+(.+)$/);
+        if (!parts) continue;
+        
+        const [, make, model] = parts;
+        
+        // Extract year
+        const yearMatch = listingHtml.match(/\b(20\d{2})\b/);
+        const year = yearMatch ? parseInt(yearMatch[1]) : null;
+        
+        // Extract price
+        const priceMatch = listingHtml.match(/\$[\s]?([\d,]+)/);
+        const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, '')) : null;
+        
+        // Extract mileage
+        const mileageMatch = listingHtml.match(/([\d,]+)\s*(?:km|KM)/);
+        const mileage = mileageMatch ? parseInt(mileageMatch[1].replace(/,/g, '')) : null;
+        
+        // Extract location
+        const locationMatch = listingHtml.match(/(?:Location|City)[:\s]+([^<,]+)/i);
+        const location = locationMatch ? locationMatch[1].trim() : 'Ontario';
+        
+        // Extract URL
+        const urlMatch = listingHtml.match(/href=['"](\/listing\/[^'"]+)['"]/i);
+        const listingUrl = urlMatch ? `https://www.visor.vin${urlMatch[1]}` : null;
+        
+        if (!listingUrl || !price) continue;
+        
+        // Assume automatic and AWD from search filter
+        const car = {
+          source: 'Visor.vin',
+          year,
+          make,
+          model,
+          price,
+          mileage,
+          location,
+          transmission: 'Automatic',
+          drivetrain: 'AWD',
+          url: listingUrl
+        };
+        
+        listings.push(car);
+      } catch (e) {
+        // Skip malformed listings
+        continue;
+      }
+    }
+    
+    console.log(`✅ Visor.vin: Found ${listings.length} listings`);
+    return listings;
   } catch (error) {
     console.error('❌ Visor.vin error:', error.message);
     return [];
@@ -235,32 +311,40 @@ async function runScan() {
   const seenListings = loadSeenListings();
   let newMatches = [];
 
-  // Run all scrapers
-  const results = await Promise.all([
-    scrapeKijiji(),
-    scrapeAutoTrader(),
-    scrapeCarGurus(),
-    scrapeVisorVin(),
-    scrapeFacebookMarketplace()
-  ]);
+  // Run Visor.vin scraper (most reliable for now)
+  console.log('📡 Starting scan of Visor.vin...');
+  const visorListings = await scrapeVisorVin();
+  
+  // Log other sources as pending
+  console.log('⏳ Kijiji, AutoTrader, CarGurus, Facebook: Coming soon');
 
-  const allCars = results.flat();
+  const allCars = visorListings;
 
   // Filter and alert on new matches
+  if (allCars.length > 0) {
+    console.log(`\n🔎 Checking ${allCars.length} listings against your criteria...`);
+  }
+  
   for (const car of allCars) {
     const listingId = `${car.source}-${car.url}`;
     
-    if (!seenListings.includes(listingId) && matchesCriteria(car)) {
-      newMatches.push(car);
-      seenListings.push(listingId);
-      await sendAlert(car);
+    if (!seenListings.includes(listingId)) {
+      if (matchesCriteria(car)) {
+        newMatches.push(car);
+        seenListings.push(listingId);
+        console.log(`\n✨ MATCH FOUND: ${car.year} ${car.make} ${car.model} - $${car.price.toLocaleString()}`);
+        await sendAlert(car);
+      } else {
+        // Still track as seen to avoid future checks
+        seenListings.push(listingId);
+      }
     }
   }
 
   saveSeenListings(seenListings);
   
   console.log(`\n✅ Scan complete. Found ${newMatches.length} new matches.`);
-  console.log(`📊 Total listings seen: ${seenListings.length}`);
+  console.log(`📊 Total unique listings scanned: ${seenListings.length}`);
 }
 
 // Run the agent
