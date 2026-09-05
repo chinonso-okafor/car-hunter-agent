@@ -1,0 +1,18 @@
+{
+  "name": "car-hunter-agent",
+  "version": "1.0.0",
+  "description": "Automated car listing monitor for Ontario with email alerts",
+  "main": "car-hunter-agent.js",
+  "scripts": {
+    "start": "node car-hunter-agent.js",
+    "test": "node car-hunter-agent.js"
+  },
+  "keywords": ["cars", "listings", "monitor", "automation"],
+  "author": "Chinonso Okafor",
+  "license": "MIT",
+  "dependencies": {
+    "nodemailer": "^6.9.7",
+    "puppeteer": "^21.6.1",
+    "axios": "^1.6.5"
+  }
+}
